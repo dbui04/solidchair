@@ -1,12 +1,110 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, memo } from "react";
 import {
   useReactTable,
   getCoreRowModel,
   flexRender,
 } from "@tanstack/react-table";
 import { api } from "~/trpc/react";
+
+// Memoized TableCell component to prevent unnecessary re-renders
+const TableCell = memo(
+  ({
+    row,
+    column,
+    cellValue,
+    cellData,
+    columnInfo,
+    isEditing,
+    editingCell,
+    setEditingCell,
+    updateCell,
+  }: {
+    row: any;
+    column: any;
+    cellValue: any;
+    cellData: any;
+    columnInfo: any;
+    isEditing: boolean;
+    editingCell: any;
+    setEditingCell: (cell: any) => void;
+    updateCell: any;
+  }) => {
+    let displayValue = cellValue;
+    if (columnInfo?.type === "number" && cellValue) {
+      const numValue = parseFloat(cellValue);
+      if (!isNaN(numValue)) {
+        displayValue = numValue.toLocaleString();
+      }
+    }
+
+    if (isEditing && editingCell) {
+      return (
+        <input
+          autoFocus
+          className="w-full h-full px-3 py-2 border-none focus:outline-none bg-blue-50"
+          value={editingCell.value}
+          type={columnInfo?.type === "number" ? "number" : "text"}
+          onChange={(e) =>
+            setEditingCell({ ...editingCell, value: e.target.value })
+          }
+          onBlur={() => {
+            updateCell.mutate({
+              id: editingCell.cellId,
+              value: editingCell.value,
+            });
+            setEditingCell(null);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              updateCell.mutate({
+                id: editingCell.cellId,
+                value: editingCell.value,
+              });
+              setEditingCell(null);
+            } else if (e.key === "Tab") {
+              e.preventDefault();
+              updateCell.mutate({
+                id: editingCell.cellId,
+                value: editingCell.value,
+              });
+              setEditingCell(null);
+            } else if (e.key === "Escape") {
+              setEditingCell(null);
+            }
+          }}
+        />
+      );
+    }
+
+    return (
+      <div
+        data-row-id={row.original.id}
+        data-column-id={column.id}
+        className={`w-full h-full px-3 py-2 cursor-pointer min-h-[36px] hover:bg-gray-50 ${
+          columnInfo?.type === "number" ? "text-right" : ""
+        }`}
+        onClick={() => {
+          if (cellData) {
+            setEditingCell({
+              rowId: row.original.id,
+              columnId: column.id,
+              cellId: cellData.id,
+              value: cellData.value || "",
+            });
+          }
+        }}
+      >
+        {displayValue}
+      </div>
+    );
+  },
+);
+
+// Add display name for React DevTools
+TableCell.displayName = "TableCell";
 
 export function DataTable({ tableId }: { tableId: string }) {
   const [editingCell, setEditingCell] = useState<{
@@ -58,83 +156,22 @@ export function DataTable({ tableId }: { tableId: string }) {
           editingCell?.rowId === row.original.id &&
           editingCell?.columnId === column.id;
 
-        // Format the display value based on column type
-        let displayValue = cellValue;
         const columnInfo = tableData?.columns.find(
           (col) => col.id === column.id,
         );
-        if (columnInfo?.type === "number" && cellValue) {
-          const numValue = parseFloat(cellValue);
-          if (!isNaN(numValue)) {
-            displayValue = numValue.toLocaleString();
-          }
-        }
-
-        if (isEditing && editingCell) {
-          return (
-            <input
-              autoFocus
-              className="w-full h-full px-3 py-2 border-none focus:outline-none bg-blue-50"
-              value={editingCell.value}
-              type={columnInfo?.type === "number" ? "number" : "text"}
-              onChange={(e) =>
-                setEditingCell({ ...editingCell, value: e.target.value })
-              }
-              onBlur={() => {
-                updateCell.mutate({
-                  id: editingCell.cellId,
-                  value: editingCell.value,
-                });
-                setEditingCell(null);
-              }}
-              onKeyDown={(e) => {
-                // Handle special key presses
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  updateCell.mutate({
-                    id: editingCell.cellId,
-                    value: editingCell.value,
-                  });
-                  setEditingCell(null);
-
-                  // Rest of your Enter key code...
-                } else if (e.key === "Tab") {
-                  e.preventDefault();
-                  updateCell.mutate({
-                    id: editingCell.cellId,
-                    value: editingCell.value,
-                  });
-                  setEditingCell(null);
-
-                  // Rest of your Tab key code...
-                } else if (e.key === "Escape") {
-                  setEditingCell(null);
-                }
-              }}
-            />
-          );
-        }
 
         return (
-          <div
-            data-row-id={row.original.id}
-            data-column-id={column.id}
-            className={`w-full h-full px-3 py-2 cursor-pointer min-h-[36px] hover:bg-gray-50 ${
-              columnInfo?.type === "number" ? "text-right" : ""
-            }`}
-            onClick={() => {
-              if (cellData) {
-                setEditingCell({
-                  rowId: row.original.id,
-                  columnId: column.id,
-                  cellId: cellData.id,
-                  value: cellData.value || "",
-                });
-              }
-            }}
-          >
-            {displayValue}
-          </div>
+          <TableCell
+            row={row}
+            column={column}
+            cellValue={cellValue}
+            cellData={cellData}
+            columnInfo={columnInfo}
+            isEditing={isEditing}
+            editingCell={editingCell}
+            setEditingCell={setEditingCell}
+            updateCell={updateCell}
+          />
         );
       },
     })) || [];
@@ -145,6 +182,116 @@ export function DataTable({ tableId }: { tableId: string }) {
     columns,
     getCoreRowModel: getCoreRowModel(),
   });
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (editingCell) return; // Don't navigate while editing
+
+      if (["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(e.key)) {
+        e.preventDefault();
+
+        const tableElement = tableRef.current;
+        if (!tableElement) return;
+
+        // Find the active cell
+        const cells = tableElement.querySelectorAll(
+          "[data-row-id][data-column-id]",
+        );
+        if (!cells.length) return;
+
+        // Try to find focused element or last clicked cell
+        const activeElement = document.activeElement;
+        let currentCell: Element | null = null;
+
+        if (activeElement && activeElement.hasAttribute("data-row-id")) {
+          currentCell = activeElement;
+        } else if (cells.length > 0) {
+          currentCell = cells[0] as Element | null;
+        }
+
+        if (!currentCell) return;
+
+        const currentRowId = currentCell.getAttribute("data-row-id");
+        const currentColId = currentCell.getAttribute("data-column-id");
+
+        if (!currentRowId || !currentColId) return;
+
+        // Find all row IDs and col IDs
+        const rowIds = Array.from(
+          new Set(
+            Array.from(cells).map((cell) => cell.getAttribute("data-row-id")),
+          ),
+        ).filter(Boolean) as string[];
+
+        const colIds = Array.from(
+          new Set(
+            Array.from(cells).map((cell) =>
+              cell.getAttribute("data-column-id"),
+            ),
+          ),
+        ).filter(Boolean) as string[];
+
+        // Current positions
+        const rowIndex = rowIds.indexOf(currentRowId);
+        const colIndex = colIds.indexOf(currentColId);
+
+        let targetCell: Element | null = null;
+
+        // Calculate new position
+        switch (e.key) {
+          case "ArrowUp":
+            if (rowIndex > 0) {
+              targetCell =
+                Array.from(cells).find(
+                  (cell) =>
+                    cell.getAttribute("data-row-id") === rowIds[rowIndex - 1] &&
+                    cell.getAttribute("data-column-id") === currentColId,
+                ) || null;
+            }
+            break;
+          case "ArrowDown":
+            if (rowIndex < rowIds.length - 1) {
+              targetCell =
+                Array.from(cells).find(
+                  (cell) =>
+                    cell.getAttribute("data-row-id") === rowIds[rowIndex + 1] &&
+                    cell.getAttribute("data-column-id") === currentColId,
+                ) || null;
+            }
+            break;
+          case "ArrowLeft":
+            if (colIndex > 0) {
+              targetCell =
+                Array.from(cells).find(
+                  (cell) =>
+                    cell.getAttribute("data-row-id") === currentRowId &&
+                    cell.getAttribute("data-column-id") ===
+                      colIds[colIndex - 1],
+                ) || null;
+            }
+            break;
+          case "ArrowRight":
+            if (colIndex < colIds.length - 1) {
+              targetCell =
+                Array.from(cells).find(
+                  (cell) =>
+                    cell.getAttribute("data-row-id") === currentRowId &&
+                    cell.getAttribute("data-column-id") ===
+                      colIds[colIndex + 1],
+                ) || null;
+            }
+            break;
+        }
+
+        if (targetCell) {
+          (targetCell as HTMLElement).click();
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [editingCell, tableData]);
 
   const handleAddRow = () => {
     createRow.mutate({ tableId });
