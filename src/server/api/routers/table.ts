@@ -1,6 +1,9 @@
 import { z } from "zod";
 import { TRPCError } from "@trpc/server";
 import { createTRPCRouter, publicProcedure } from "~/server/api/trpc";
+import { PrismaClient } from "@prisma/client";
+
+const prisma = new PrismaClient();
 
 export const tableRouter = createTRPCRouter({
   create: publicProcedure
@@ -36,6 +39,7 @@ export const tableRouter = createTRPCRouter({
         orderBy: { createdAt: "desc" },
       });
     }),
+
   getById: publicProcedure
     .input(z.object({ id: z.string() }))
     .query(async ({ ctx, input }) => {
@@ -73,6 +77,168 @@ export const tableRouter = createTRPCRouter({
         ...table,
         rows,
       };
+    }),
+
+  getTableData: publicProcedure
+    .input(
+      z.object({
+        tableId: z.string(),
+        cursor: z.number().nullish(),
+        limit: z.number().min(1).max(100).default(50),
+        filters: z
+          .object({
+            columnId: z.string().optional(),
+            query: z.string().optional(),
+          })
+          .optional(),
+        sorting: z
+          .object({
+            columnId: z.string(),
+            direction: z.enum(["asc", "desc"]),
+          })
+          .optional(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const { tableId, cursor, limit, filters, sorting } = input;
+
+      // Get columns for this table
+      const columns = await ctx.db.column.findMany({
+        where: { tableId },
+        orderBy: { order: "asc" },
+      });
+
+      // Always calculate totalRowsCount to fix the row count display issue
+      const totalRowsCount = await ctx.db.row.count({
+        where: { tableId },
+      });
+
+      // Prepare standard query parameters
+      const skip = cursor || 0;
+      const take = limit + 1; // Take one extra to check if there are more
+
+      // Handle sorting case differently for better performance
+      if (sorting) {
+        // Query using a join approach for better performance with sorting
+        // Get the rows with the specific cells we need for sorting
+        const rowsWithSortingCells = await ctx.db.$queryRaw<
+          Array<{ id: string; rowId: string; value: string }>
+        >`
+  SELECT c.id, c."rowId", c.value
+  FROM "Cell" c
+  JOIN "Row" r ON c."rowId" = r.id
+  WHERE c."columnId" = ${sorting.columnId}
+    AND r."tableId" = ${tableId}
+  ORDER BY c.value ${sorting.direction === "asc" ? "ASC" : "DESC"}
+  LIMIT ${take} OFFSET ${skip}
+`;
+
+        if (rowsWithSortingCells.length === 0) {
+          return {
+            rows: [],
+            columns,
+            nextCursor: null,
+            totalCount: totalRowsCount,
+          };
+        }
+
+        // Extract row IDs in the correct sort order
+        const rowIds = rowsWithSortingCells.map((row) => row.rowId);
+
+        // Fetch the complete rows with all their cells
+        const rows = await ctx.db.row.findMany({
+          where: {
+            id: { in: rowIds },
+          },
+          include: {
+            cells: {
+              include: {
+                column: true,
+              },
+            },
+          },
+        });
+
+        // Sort rows to match the order from the sorting query
+        rows.sort((a, b) => {
+          return rowIds.indexOf(a.id) - rowIds.indexOf(b.id);
+        });
+
+        // Check if there's a next page
+        const hasMore = rows.length > limit;
+        if (hasMore) rows.pop();
+
+        return {
+          rows,
+          columns,
+          nextCursor: hasMore ? (cursor || 0) + limit : null,
+          totalCount: totalRowsCount,
+        };
+      }
+      // Handle filtering separately
+      else if (filters?.columnId && filters.query) {
+        // Use more efficient direct query with filtering
+        const filteredRows = await ctx.db.row.findMany({
+          where: {
+            tableId,
+            cells: {
+              some: {
+                columnId: filters.columnId,
+                value: { contains: filters.query, mode: "insensitive" },
+              },
+            },
+          },
+          take,
+          skip,
+          orderBy: { id: "asc" },
+          include: {
+            cells: {
+              include: {
+                column: true,
+              },
+            },
+          },
+        });
+
+        // Check if there's a next page
+        const hasMore = filteredRows.length > limit;
+        if (hasMore) filteredRows.pop();
+
+        return {
+          rows: filteredRows,
+          columns,
+          nextCursor: hasMore ? (cursor || 0) + limit : null,
+          totalCount: totalRowsCount,
+        };
+      }
+      // Base case - no sorting or filtering
+      else {
+        // Simple query for rows
+        const rows = await ctx.db.row.findMany({
+          where: { tableId },
+          take,
+          skip,
+          orderBy: { id: "asc" },
+          include: {
+            cells: {
+              include: {
+                column: true,
+              },
+            },
+          },
+        });
+
+        // Check if there's a next page
+        const hasMore = rows.length > limit;
+        if (hasMore) rows.pop();
+
+        return {
+          rows,
+          columns,
+          nextCursor: hasMore ? (cursor || 0) + limit : null,
+          totalCount: totalRowsCount,
+        };
+      }
     }),
 
   updateCell: publicProcedure
@@ -121,6 +287,75 @@ export const tableRouter = createTRPCRouter({
 
       return row;
     }),
+
+  createBulkRows: publicProcedure
+    .input(
+      z.object({
+        tableId: z.string(),
+        count: z.number().min(1).max(100000),
+      }),
+    )
+    .mutation(async ({ ctx, input }) => {
+      // Get all columns for this table
+      const columns = await ctx.db.column.findMany({
+        where: { tableId: input.tableId },
+      });
+
+      // Import the faker utility
+      const { generateCellValue } = await import("~/utils/faker");
+
+      // Create rows in batches to avoid timeouts
+      const batchSize = 1000;
+      const batches = Math.ceil(input.count / batchSize);
+
+      let createdCount = 0;
+
+      for (let i = 0; i < batches; i++) {
+        const currentBatchSize = Math.min(
+          batchSize,
+          input.count - createdCount,
+        );
+
+        // Create array of row objects
+        const rowsToCreate = Array.from({ length: currentBatchSize }).map(
+          () => ({
+            tableId: input.tableId,
+          }),
+        );
+
+        // Create rows in a batch
+        const createdRows = await ctx.db.row.createMany({
+          data: rowsToCreate,
+          skipDuplicates: true,
+        });
+
+        // Get the created row IDs
+        const newRows = await ctx.db.row.findMany({
+          where: { tableId: input.tableId },
+          orderBy: { id: "desc" },
+          take: currentBatchSize,
+        });
+
+        // Create cells for each row
+        for (const row of newRows) {
+          const cellsToCreate = columns.map((column) => ({
+            rowId: row.id,
+            columnId: column.id,
+            value: generateCellValue(column.type, column.name),
+          }));
+
+          await ctx.db.cell.createMany({
+            data: cellsToCreate,
+            skipDuplicates: true,
+          });
+        }
+
+        createdCount += currentBatchSize;
+      }
+
+      return { count: createdCount };
+    }),
+
   createColumn: publicProcedure
     .input(
       z.object({

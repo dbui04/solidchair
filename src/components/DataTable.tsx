@@ -7,6 +7,7 @@ import {
   flexRender,
 } from "@tanstack/react-table";
 import { api } from "~/trpc/react";
+import toast from "react-hot-toast";
 
 // Memoized TableCell component to prevent unnecessary re-renders
 const TableCell = memo(
@@ -134,6 +135,12 @@ export function DataTable({ tableId }: { tableId: string }) {
   const createRow = api.table.createRow.useMutation({
     onSuccess: async () => {
       await utils.table.getById.invalidate({ id: tableId });
+    },
+  });
+
+  const bulkRowsMutation = api.table.createBulkRows.useMutation({
+    onSuccess: () => {
+      void utils.table.getById.invalidate({ id: tableId });
     },
   });
 
@@ -311,6 +318,27 @@ export function DataTable({ tableId }: { tableId: string }) {
 
   const hasNoData = table.getRowModel().rows.length === 0;
 
+  const generateRows = (count: number) => {
+    // Show loading state
+    const loadingToast = toast.loading(`Generating ${count} rows...`);
+
+    bulkRowsMutation.mutate(
+      { tableId, count },
+      {
+        onSuccess: () => {
+          toast.success(`Added ${count} rows successfully!`, {
+            id: loadingToast,
+          });
+        },
+        onError: (error) => {
+          toast.error(`Error adding rows: ${error.message}`, {
+            id: loadingToast,
+          });
+        },
+      },
+    );
+  };
+
   return (
     <div className="relative overflow-hidden">
       <div className="overflow-x-auto border-b border-gray-200">
@@ -375,6 +403,43 @@ export function DataTable({ tableId }: { tableId: string }) {
           className="text-gray-500 hover:text-gray-700 text-sm hover:bg-gray-100 py-1 px-2 rounded"
         >
           + Add record
+        </button>
+      </div>
+      {/*Add bulk data button*/}
+      <div className="bg-gray-50 py-3 px-4 border-b border-gray-200 flex items-center gap-2">
+        <button
+          onClick={handleAddRow}
+          className="text-gray-500 hover:text-gray-700 text-sm hover:bg-gray-100 py-1 px-2 rounded"
+        >
+          + Add record
+        </button>
+
+        <button
+          onClick={() => generateRows(100)}
+          className="text-gray-500 hover:text-gray-700 text-sm hover:bg-gray-100 py-1 px-2 rounded"
+        >
+          + Add 100 rows
+        </button>
+
+        <button
+          onClick={() => generateRows(1000)}
+          className="text-gray-500 hover:text-gray-700 text-sm hover:bg-gray-100 py-1 px-2 rounded"
+        >
+          + Add 1k rows
+        </button>
+
+        <button
+          onClick={() => generateRows(10000)}
+          className="text-blue-500 hover:text-blue-700 text-sm hover:bg-blue-100 py-1 px-2 rounded ml-2"
+        >
+          + Add 10k rows
+        </button>
+
+        <button
+          onClick={() => generateRows(100000)}
+          className="bg-blue-500 hover:bg-blue-600 text-white text-sm py-1 px-2 rounded-md ml-2"
+        >
+          + Add 100k rows
         </button>
       </div>
     </div>

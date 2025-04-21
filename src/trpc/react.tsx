@@ -8,16 +8,16 @@ import { useState } from "react";
 import SuperJSON from "superjson";
 
 import type { AppRouter } from "~/server/api/root";
-import { createQueryClient } from "./query-client";
+import { getQueryClient } from "./query-client";
 
 let clientQueryClientSingleton: QueryClient | undefined = undefined;
-const getQueryClient = () => {
+const getLocalQueryClient = () => {
 	if (typeof window === "undefined") {
 		// Server: always make a new query client
-		return createQueryClient();
+		return getQueryClient();
 	}
 	// Browser: use singleton pattern to keep the same query client
-	clientQueryClientSingleton ??= createQueryClient();
+	clientQueryClientSingleton ??= getQueryClient();
 
 	return clientQueryClientSingleton;
 };
@@ -39,7 +39,7 @@ export type RouterInputs = inferRouterInputs<AppRouter>;
 export type RouterOutputs = inferRouterOutputs<AppRouter>;
 
 export function TRPCReactProvider(props: { children: React.ReactNode }) {
-	const queryClient = getQueryClient();
+	const queryClient = getLocalQueryClient();
 
 	const [trpcClient] = useState(() =>
 		api.createClient({

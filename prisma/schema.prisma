@@ -41,6 +41,8 @@ model Row {
   tableId String
   table   Table  @relation(fields: [tableId], references: [id], onDelete: Cascade)
   cells   Cell[]
+
+  @@index([tableId])
 }
 
 model Cell {
@@ -51,7 +53,8 @@ model Cell {
   columnId String
   column   Column  @relation(fields: [columnId], references: [id], onDelete: Cascade)
 
-  @@index([rowId, columnId])
+  @@index([rowId])
   @@index([columnId])
   @@index([value])
+  @@index([rowId, columnId])
 }

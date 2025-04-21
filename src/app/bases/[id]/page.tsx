@@ -4,7 +4,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { api } from "~/trpc/react";
-import { DataTable } from "~/components/DataTable";
+import { VirtualizedDataTable } from "~/components/VirtualizedDataTable";
 
 export default function BaseDetailPage() {
   const params = useParams<{ id: string }>();
@@ -46,6 +46,7 @@ export default function BaseDetailPage() {
       setNewColumnName("");
       if (activeTableId) {
         await utils.table.getById.invalidate({ id: activeTableId });
+        await utils.table.getTableData.invalidate();
       }
     },
   });
@@ -123,11 +124,10 @@ export default function BaseDetailPage() {
               <button
                 key={table.id}
                 onClick={() => setActiveTableId(table.id)}
-                className={`px-3 py-1 rounded-md text-sm whitespace-nowrap ${
-                  activeTableId === table.id
+                className={`px-3 py-1 rounded-md text-sm whitespace-nowrap ${activeTableId === table.id
                     ? "bg-blue-100 text-blue-700"
                     : "text-gray-600 hover:bg-gray-100"
-                }`}
+                  }`}
               >
                 {table.name}
               </button>
@@ -171,11 +171,11 @@ export default function BaseDetailPage() {
       </div>
 
       {/* Main content area */}
-      <div className="flex-1 overflow-auto p-4 bg-gray-50">
+      <div className="flex-1 overflow-hidden bg-gray-50">
         {activeTableId ? (
-          <div className="bg-white border border-gray-200 rounded-md">
+          <div className="h-full flex flex-col">
             {/* Add column form */}
-            <div className="border-b border-gray-200 p-3">
+            <div className="bg-white border-b border-gray-200 p-3">
               <form
                 onSubmit={handleAddColumn}
                 className="flex items-center space-x-2"
@@ -207,8 +207,10 @@ export default function BaseDetailPage() {
               </form>
             </div>
 
-            {/* Table content */}
-            {<DataTable tableId={activeTableId} />}
+            {/* Virtual table */}
+            <div className="flex-1 overflow-hidden h-full">
+              <VirtualizedDataTable tableId={activeTableId} />
+            </div>
           </div>
         ) : (
           <div className="text-center text-gray-500 mt-20">
