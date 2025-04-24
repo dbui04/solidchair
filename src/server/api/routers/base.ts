@@ -20,30 +20,35 @@ export const baseRouter = createTRPCRouter({
   create: publicProcedure
     .input(z.object({ name: z.string().min(1) }))
     .mutation(async ({ ctx, input }) => {
-      // Create the base
-      const base = await ctx.db.base.create({
-        data: {
-          name: input.name,
-        },
-      });
+      try {
+        const base = await ctx.db.base.create({
+          data: {
+            name: input.name,
+          },
+        });
+        console.log("Base created successfully:", base.id);
 
-      // Create a default table named "Table 1"
-      const table = await ctx.db.table.create({
-        data: {
-          name: "Table 1",
-          baseId: base.id,
-        },
-      });
+        // Create a default table named "Table 1"
+        const table = await ctx.db.table.create({
+          data: {
+            name: "Table 1",
+            baseId: base.id,
+          },
+        });
 
-      // Create default columns
-      await ctx.db.column.createMany({
-        data: [
-          { name: "Name", type: "text", order: 0, tableId: table.id },
-          { name: "Notes", type: "text", order: 1, tableId: table.id },
-          { name: "Status", type: "text", order: 2, tableId: table.id },
-        ],
-      });
+        // Create default columns
+        await ctx.db.column.createMany({
+          data: [
+            { name: "Name", type: "text", order: 0, tableId: table.id },
+            { name: "Notes", type: "text", order: 1, tableId: table.id },
+            { name: "Status", type: "text", order: 2, tableId: table.id },
+          ],
+        });
 
-      return base;
+        return base;
+      } catch (error) {
+        console.error("Error creating base:", error);
+        throw error;
+      }
     }),
 });
